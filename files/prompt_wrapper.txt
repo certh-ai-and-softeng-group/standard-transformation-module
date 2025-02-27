@@ -1,0 +1,11 @@
+This is an excerpt of a security standard. Please extract the sentences that correspond to security requirements.
+
+“
+{excerpt --> user input}
+”
+
+##RULES:
+
+Treat as security requirements sentences that contain words like “must”, “shall”, “should”, “can”, “could”, “may”, “might”.
+Do NOT alter the sentences. Extract the WHOLE sentences that correspond to requirements AS IS.
+The extracted requirements MUST be put in a JSON Array. Each requirement MUST be a separate JSON Object (label: “requirement” / value: the extracted requirement)
