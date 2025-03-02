@@ -14,4 +14,4 @@ async def extract_requirements(request: ComplianceRequest):
     """
     Endpoint to extract security requirements and store them in MongoDB.
     """
-    return await process_compliance_request(request.standard, request.excerpt)
+    return process_compliance_request(request.standard, request.excerpt)

@@ -10,22 +10,13 @@ services:
     environment:
       MONGO_INITDB_ROOT_USERNAME: root
       MONGO_INITDB_ROOT_PASSWORD: example
-    volumes:
-      - mongo_data:/data/db
 
   fastapi_app:
     build: .
     container_name: fastapi_app
-    restart: always
     depends_on:
       - mongo
     ports:
       - "8000:8000"
     environment:
       - MONGO_URL=mongodb://root:example@mongo:27017/?authSource=admin
-    volumes:
-      - .:/app
-
-volumes:
-  mongo_data:
-    driver: local

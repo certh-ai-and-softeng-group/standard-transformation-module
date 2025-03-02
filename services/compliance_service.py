@@ -1,6 +1,5 @@
 import json
 import re
-
 from fastapi import HTTPException
 import requests
 import os
@@ -10,16 +9,20 @@ from models.ComplianceModel import ComplianceModel
 from utils.utils import load_prompt_wrapper
 from dotenv import load_dotenv
 
-# Open WebUI API Endpoint
-BASE_URL = "http://160.40.52.27:3000/api/chat/completions"
-
+# Load environment variables
 load_dotenv()
+
 # Load Authorization Token from ENV
 OPENWEBUI_AUTH = os.getenv("OPENWEBUI_AUTH")
 if not OPENWEBUI_AUTH:
     raise RuntimeError("OPENWEBUI_AUTH environment variable is missing. Set it before running the app.")
 
-async def process_compliance_request(standard: str, excerpt: str):
+BASE_URL = os.getenv("BASE_URL")
+if not BASE_URL:
+    raise RuntimeError("BASE_URL environment variable is missing. Set it before running the app.")
+
+
+def process_compliance_request(standard: str, excerpt: str):
     """
     Sends request to Open WebUI and stores extracted requirements in MongoDB.
     """
@@ -50,10 +53,26 @@ async def process_compliance_request(standard: str, excerpt: str):
 
             if match:
                 json_array_str = match.group(0)  # Extracted JSON array as a string
-                extracted_requirements = json.loads(json_array_str)  # Convert to Python list
-                extracted_requirements_list = [req["requirement"] for req in extracted_requirements]
+                try:
+                    extracted_requirements = json.loads(json_array_str)  # Convert to Python list
+                    if not isinstance(extracted_requirements, list):
+                        raise ValueError("Extracted data is not a valid list.")
+
+                    # Ensure each item in the list is a dictionary and has a "requirement" key
+                    for req in extracted_requirements:
+                        if not isinstance(req, dict) or "requirement" not in req:
+                            raise ValueError("Each requirement must be a dictionary with a 'requirement' key.")
+
+                    extracted_requirements_list = [req["requirement"] for req in extracted_requirements]
+
+                except (json.JSONDecodeError, ValueError) as e:
+                    raise HTTPException(status_code=500, detail=f"Invalid extracted requirements format: {str(e)}")
             else:
-                raise HTTPException(status_code=500, detail="No extracted requirements found in the response.")
+                raise HTTPException(status_code=500, detail="No valid extracted requirements found in the response.")
+
+        # Ensure we have extracted requirements before inserting into MongoDB
+        if not extracted_requirements_list:
+            raise HTTPException(status_code=500, detail="No valid requirements were extracted from the LLM response.")
 
         # Create ComplianceModel instance
         compliance_entry = ComplianceModel(
@@ -63,11 +82,15 @@ async def process_compliance_request(standard: str, excerpt: str):
             extracted_requirements=extracted_requirements_list
         )
 
-        # Insert into MongoDB
-        collection = await get_collection("compliance_entries")
-        result = await collection.insert_one(compliance_entry.dict())
+        # Insert into MongoDB (Synchronous)
+        collection = get_collection("compliance_entries")
+        result = collection.insert_one(compliance_entry.dict())  # ✅ No await here!
 
-        return {"id": str(result.inserted_id), "status": "Stored successfully"}
+        return {
+            "message": "Requirements extracted successfully.",
+            "inserted_id": str(result.inserted_id),
+            "extracted_requirements": extracted_requirements_list
+        }
 
     except requests.exceptions.RequestException as e:
         raise HTTPException(status_code=500, detail=f"Request error: {str(e)}")
