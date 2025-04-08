@@ -94,3 +94,42 @@ def process_compliance_request(standard: str, excerpt: str):
 
     except requests.exceptions.RequestException as e:
         raise HTTPException(status_code=500, detail=f"Request error: {str(e)}")
+
+def get_requirement_by_id(requirement_id: str):
+    """
+    Retrieves a specific requirement by its ID from MongoDB.
+    """
+    collection = get_collection("compliance_entries")
+    compliance_entry = collection.find_one({"_id": requirement_id})
+
+    if not compliance_entry:
+        raise HTTPException(status_code=404, detail="Requirement not found.")
+
+    return {
+        "id": str(compliance_entry["_id"]),
+        "standard": compliance_entry["standard"],
+        "timestamp": compliance_entry["timestamp"],
+        "excerpt": compliance_entry["excerpt"],
+        "extracted_requirements": compliance_entry["extracted_requirements"]
+    }
+
+def get_requirement_by_standard(standard: str):
+    """
+    Retrieves all requirements for a specific standard from MongoDB.
+    """
+    collection = get_collection("compliance_entries")
+    compliance_entries = collection.find({"standard": standard})
+
+    if not compliance_entries:
+        raise HTTPException(status_code=404, detail="No requirements found for this standard.")
+
+    return [
+        {
+            "id": str(entry["_id"]),
+            "standard": entry["standard"],
+            "timestamp": entry["timestamp"],
+            "excerpt": entry["excerpt"],
+            "extracted_requirements": entry["extracted_requirements"]
+        }
+        for entry in compliance_entries
+    ]
