@@ -1,3 +1,5 @@
+from typing import Optional
+
 from fastapi import FastAPI
 from pydantic import BaseModel
 from services.compliance_service import process_compliance_request
@@ -9,13 +11,19 @@ app = FastAPI()
 class ComplianceRequest(BaseModel):
     standard: str
     excerpt: str
+    id: Optional[str] = None  # New optional field
+@app.get("/")
+async def root():
+    return {"message": "Standard Transformation Module is running!"}
 
 @app.post("/extract-requirements/")
 async def extract_requirements(request: ComplianceRequest):
     """
     Endpoint to extract security requirements and store them in MongoDB.
+    If an ID is provided and exists, the existing entry is returned.
     """
-    return process_compliance_request(request.standard, request.excerpt)
+    return process_compliance_request(request.standard, request.excerpt, request.id)
+
 
 @app.get("/requirement/id/{requirement_id}")
 async def get_requirement(requirement_id: str):

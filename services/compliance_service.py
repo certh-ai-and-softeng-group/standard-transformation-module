@@ -4,6 +4,7 @@ from fastapi import HTTPException
 import requests
 import os
 from datetime import datetime
+from bson import ObjectId
 from models.database import get_collection
 from models.ComplianceModel import ComplianceModel
 from utils.utils import load_prompt_wrapper
@@ -22,11 +23,31 @@ if not BASE_URL:
     raise RuntimeError("BASE_URL environment variable is missing. Set it before running the app.")
 
 
-def process_compliance_request(standard: str, excerpt: str):
+def process_compliance_request(standard: str, excerpt: str, entry_id: str = None):
     """
-    Sends request to Open WebUI and stores extracted requirements in MongoDB.
+    Sends request to Open WebUI and stores extracted requirements in MongoDB,
+    unless an entry with the given ID already exists.
     """
 
+    # Check if an ID is provided and if the entry already exists in MongoDB
+    if entry_id:
+        try:
+            object_id = ObjectId(entry_id)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid ID format.")
+
+        collection = get_collection("compliance_entries")
+        existing_entry = collection.find_one({"_id": object_id})
+        if existing_entry:
+            return {
+                "id": str(existing_entry["_id"]),
+                "standard": existing_entry["standard"],
+                "timestamp": existing_entry["timestamp"],
+                "excerpt": existing_entry["excerpt"],
+                "extracted_requirements": existing_entry["extracted_requirements"]
+            }
+
+    # Load the prompt and inject the excerpt
     prompt_template = load_prompt_wrapper()
     formatted_prompt = prompt_template.replace("{excerpt --> user input}", excerpt)
 
@@ -45,20 +66,19 @@ def process_compliance_request(standard: str, excerpt: str):
         response.raise_for_status()
         response_data = response.json()
 
-        # Extract requirements from the response
+        # Extract JSON array of requirements from the LLM response
         extracted_requirements_list = []
         if "choices" in response_data and len(response_data["choices"]) > 0:
             message_content = response_data["choices"][0]["message"]["content"]
-            match = re.search(r"\[\s*\{.*\}\s*\]", message_content, re.DOTALL)
+            match = re.search(r"\[\s*\{.*?\}\s*\]", message_content, re.DOTALL)
 
             if match:
-                json_array_str = match.group(0)  # Extracted JSON array as a string
+                json_array_str = match.group(0)
                 try:
-                    extracted_requirements = json.loads(json_array_str)  # Convert to Python list
+                    extracted_requirements = json.loads(json_array_str)
                     if not isinstance(extracted_requirements, list):
                         raise ValueError("Extracted data is not a valid list.")
 
-                    # Ensure each item in the list is a dictionary and has a "requirement" key
                     for req in extracted_requirements:
                         if not isinstance(req, dict) or "requirement" not in req:
                             raise ValueError("Each requirement must be a dictionary with a 'requirement' key.")
@@ -70,11 +90,10 @@ def process_compliance_request(standard: str, excerpt: str):
             else:
                 raise HTTPException(status_code=500, detail="No valid extracted requirements found in the response.")
 
-        # Ensure we have extracted requirements before inserting into MongoDB
         if not extracted_requirements_list:
             raise HTTPException(status_code=500, detail="No valid requirements were extracted from the LLM response.")
 
-        # Create ComplianceModel instance
+        # Prepare the model for MongoDB
         compliance_entry = ComplianceModel(
             standard=standard,
             timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -82,9 +101,8 @@ def process_compliance_request(standard: str, excerpt: str):
             extracted_requirements=extracted_requirements_list
         )
 
-        # Insert into MongoDB (Synchronous)
         collection = get_collection("compliance_entries")
-        result = collection.insert_one(compliance_entry.dict())  # ✅ No await here!
+        result = collection.insert_one(compliance_entry.dict())
 
         return {
             "message": "Requirements extracted successfully.",
@@ -95,16 +113,16 @@ def process_compliance_request(standard: str, excerpt: str):
     except requests.exceptions.RequestException as e:
         raise HTTPException(status_code=500, detail=f"Request error: {str(e)}")
 
-def get_requirement_by_id(requirement_id: str):
+
+def get_requirement_by_id(entry_id):
     """
     Retrieves a specific requirement by its ID from MongoDB.
     """
     collection = get_collection("compliance_entries")
-    compliance_entry = collection.find_one({"_id": requirement_id})
+    compliance_entry = collection.find_one({"_id": ObjectId(entry_id)})
 
     if not compliance_entry:
         raise HTTPException(status_code=404, detail="Requirement not found.")
-
     return {
         "id": str(compliance_entry["_id"]),
         "standard": compliance_entry["standard"],
@@ -113,12 +131,13 @@ def get_requirement_by_id(requirement_id: str):
         "extracted_requirements": compliance_entry["extracted_requirements"]
     }
 
-def get_requirement_by_standard(standard: str):
+
+def get_requirement_by_standard(standard):
     """
     Retrieves all requirements for a specific standard from MongoDB.
     """
     collection = get_collection("compliance_entries")
-    compliance_entries = collection.find({"standard": standard})
+    compliance_entries = list(collection.find({"standard": standard}))
 
     if not compliance_entries:
         raise HTTPException(status_code=404, detail="No requirements found for this standard.")
